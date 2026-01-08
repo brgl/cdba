@@ -47,6 +47,7 @@ struct device {
 	unsigned int fastboot_key_timeout;
 	unsigned int power_key_press_ms;
 	int state;
+	enum power_on_mode power_on_mode;
 	bool has_power_key;
 
 	bool status_enabled;
@@ -77,7 +78,8 @@ void device_add(struct device *device);
 struct device *device_open(const char *board,
 			   const char *username);
 void device_close(struct device *dev);
-int device_power(struct device *device, bool on);
+int device_power_on(struct device *device, enum power_on_mode mode);
+int device_power_off(struct device *device);
 void device_key(struct device *device, int key, bool asserted);
 
 void device_status_enable(struct device *device);
