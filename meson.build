@@ -72,6 +72,7 @@ drivers_srcs = ['drivers/alpaca.c',
 		'drivers/ftdi-gpio.c',
 		'drivers/laurent.c',
 		'drivers/local-gpio.c',
+		'drivers/pic32cx.c',
 		'drivers/qcomlt_dbg.c',
 		]
 
