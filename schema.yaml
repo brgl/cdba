@@ -85,6 +85,10 @@ properties:
           description: Alpaca board control device path
           $ref: "#/$defs/device_path"
 
+        pic32cx:
+          description: PIC32CX board control device path
+          $ref: "#/$defs/device_path"
+
         users:
           description: User access allowance for the board
           type: array
