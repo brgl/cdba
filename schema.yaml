@@ -82,6 +82,18 @@ properties:
           description: Command to execute for generating status updates
           type: string
 
+        qdl_programmer:
+          description: path to the firehose programmer to use for QDL flashing
+          type: string
+
+        qdl_serial:
+          description: serial number of the EDL device to use for QDL flashing
+          type: string
+
+        qdl_storage:
+          description: storage type to pass to QDL when flashing
+          type: string
+
         qcomlt_debug_board:
           description: Qlt Debug Board control tty device path
           $ref: "#/$defs/device_path"

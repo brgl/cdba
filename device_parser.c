@@ -215,6 +215,12 @@ static void parse_board(struct device_parser *dp)
 			dev->status_cmd = strdup(value);
 		} else if (!strcmp(key, "power_always_on")) {
 			dev->power_always_on = !strcmp(value, "true");
+		} else if (!strcmp(key, "qdl_programmer")) {
+			dev->qdl_programmer = strdup(value);
+		} else if (!strcmp(key, "qdl_serial")) {
+			dev->qdl_serial = strdup(value);
+		} else if (!strcmp(key, "qdl_storage")) {
+			dev->qdl_storage = strdup(value);
 		} else {
 			fprintf(stderr, "device parser: unknown key \"%s\"\n", key);
 			exit(1);
