@@ -56,6 +56,17 @@ updates, which will be written to this fifo.
 
 How to quit the console and close session: ctrl+a then q
 
+= Codex skill
+
+This repository includes a reusable Codex skill for operating `cdba` via CLI:
+
+  skills/cdba-cli/SKILL.md
+
+To install it locally in Codex:
+
+  mkdir -p "$CODEX_HOME/skills"
+  cp -r skills/cdba-cli "$CODEX_HOME/skills/"
+
 = Server side
 
 == Device configuration
