@@ -213,7 +213,10 @@ static void device_tick(void *data)
 		device_key(device, DEVICE_KEY_POWER, true);
 
 		device->state = DEVICE_STATE_RELEASE_PWR;
-		watch_timer_add(100, device_tick, device);
+		if (device->power_key_press_ms)
+			watch_timer_add(device->power_key_press_ms, device_tick, device);
+		else
+			watch_timer_add(100, device_tick, device);
 		break;
 	case DEVICE_STATE_RELEASE_PWR:
 		/* Release power key */

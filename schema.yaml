@@ -49,6 +49,11 @@ properties:
           type: integer
           minimum: 1
 
+        power_key_press_ms:
+          description: duration of the power key press in milliseconds
+          type: integer
+          minimum: 100
+
         cdba:
           description: CDB Assist device path
           $ref: "#/$defs/device_path"
