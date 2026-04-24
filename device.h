@@ -45,6 +45,7 @@ struct device {
 	bool power_always_on;
 	struct fastboot *fastboot;
 	unsigned int fastboot_key_timeout;
+	unsigned int power_key_press_ms;
 	int state;
 	bool has_power_key;
 
