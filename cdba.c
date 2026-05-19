@@ -635,6 +635,7 @@ int main(int argc, char **argv)
 	struct termios *orig_tios;
 	const char *server_binary = "cdba-server";
 	const char *status_pipe = NULL;
+	bool bump_inactivity_timer;
 	int timeout_inactivity = 0;
 	int timeout_total = 600;
 	struct tx_item *tx_item;
@@ -812,6 +813,8 @@ int main(int argc, char **argv)
 			reached_timeout = true;
 		}
 
+		bump_inactivity_timer = false;
+
 		if (FD_ISSET(STDIN_FILENO, &rfds))
 			tty_callback(ssh_fds);
 
@@ -833,6 +836,8 @@ int main(int argc, char **argv)
 			write(2, blue, sizeof(blue) - 1);
 			write(2, buf, n);
 			write(2, reset, sizeof(reset) - 1);
+
+			bump_inactivity_timer = true;
 		}
 
 		if (FD_ISSET(ssh_fds[1], &rfds)) {
@@ -846,9 +851,7 @@ int main(int argc, char **argv)
 			if (n < 0)
 				break;
 
-			/* Reset inactivity timeout on activity */
-			if (timeout_inactivity)
-				timeout_inactivity_tv = get_timeout(timeout_inactivity);
+			bump_inactivity_timer = true;
 		}
 
 		if (FD_ISSET(ssh_fds[0], &wfds)) {
@@ -860,8 +863,14 @@ int main(int argc, char **argv)
 
 				list_del(&tx_item->node);
 				free(tx_item);
+
+				bump_inactivity_timer = true;
 			}
 		}
+
+		/* Reset inactivity timeout on activity */
+		if (bump_inactivity_timer && timeout_inactivity)
+			timeout_inactivity_tv = get_timeout(timeout_inactivity);
 	}
 
 	close(ssh_fds[0]);
