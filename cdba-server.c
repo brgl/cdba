@@ -148,7 +148,23 @@ static void msg_edl_flash(const void *data, size_t len)
 {
 	const char *target = data;
 
+	if (!selected_device || !current_edl_file)
+		return;
+
+	if (!len || target[len - 1]) {
+		fprintf(stderr, "invalid EDL flash target\n");
+		watch_quit();
+		return;
+	}
+
 	fprintf(stderr, "edl flash into '%s'\n", target);
+
+	if (!device_qdl_access_allowed(selected_device, username, target)) {
+		fprintf(stderr, "user '%s' is not allowed to flash EDL target '%s' on %s\n",
+			username, target, selected_device->board);
+		watch_quit();
+		return;
+	}
 
 	current_edl_file->target = strdup(target);
 	current_edl_file = NULL;

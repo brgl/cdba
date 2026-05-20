@@ -410,6 +410,33 @@ void device_info(const char *username, const void *data, size_t dlen)
 	cdba_send_buf(MSG_BOARD_INFO, len, description);
 }
 
+bool device_qdl_access_allowed(struct device *device,
+			       const char *username,
+			       const char *target)
+{
+	struct device_qdl_user *user;
+	struct device_qdl_target *qdl_target;
+
+	if (!device->qdl_access)
+		return true;
+
+	if (!username || !target)
+		return false;
+
+	list_for_each_entry(user, device->qdl_access, node) {
+		if (strcmp(user->username, username))
+			continue;
+
+		list_for_each_entry(qdl_target, &user->targets, node) {
+			if (!strcmp(qdl_target->target, "all") ||
+			    !strcmp(qdl_target->target, target))
+				return true;
+		}
+	}
+
+	return false;
+}
+
 void device_close(struct device *dev)
 {
 	if (!dev->usb_always_on)

@@ -81,6 +81,33 @@ devices:
     fastboot_set_active: true
     fastboot_key_timeout: 2
 
+  - board: qdlboard
+    users:
+      - username
+    console: /dev/ttyUSB1
+    fastboot: abcdef04
+    qdl_programmer: /path/to/prog_firehose_ddr.elf
+    qdl_access:
+      - user: username
+        targets:
+          - boot_a
+          - boot_b
+          - 0/efiesp
+          - 0/123456
+      - user: admin
+        targets:
+          - all
+
+QDL access targets use QDL's target syntax: <partition-name>, <lun>,
+<lun>/<partition-name>, or <lun>/<start-sector>. The CDBA server checks the
+requested target string against the configured access list before invoking QDL,
+but does not resolve the target to a physical partition itself. For a bare
+<partition-name>, QDL searches across all LUNs and flashes the first matching
+partition. If multiple LUNs might contain the same partition name, or if the ACL
+must identify an exact location, use the explicit <lun>/<partition-name> or
+<lun>/<start-sector> form instead. The special target "all" allows any QDL
+target.
+
   - board: testboard
     console: /dev/serial/by-id/usb-1234-if00-port0
     name: GPIO controller board

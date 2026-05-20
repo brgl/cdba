@@ -11,3 +11,11 @@ devices:
     qdl_programmer: /path/to/prog_firehose_ddr.elf
     qdl_serial: 1234567890ABCDEF
     qdl_storage: ufs
+    qdl_access:
+      - user: alice
+        targets:
+          - all
+      - user: bob
+        targets:
+          - userdata
+          - 0/123456

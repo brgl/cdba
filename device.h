@@ -67,6 +67,7 @@ struct device {
 	char *qdl_programmer;
 	char *qdl_serial;
 	char *qdl_storage;
+	struct list_head *qdl_access;
 
 	char *status_cmd;
 
@@ -75,6 +76,19 @@ struct device {
 
 struct device_user {
 	const char *username;
+
+	struct list_head node;
+};
+
+struct device_qdl_target {
+	const char *target;
+
+	struct list_head node;
+};
+
+struct device_qdl_user {
+	const char *username;
+	struct list_head targets;
 
 	struct list_head node;
 };
@@ -104,6 +118,9 @@ void device_list_devices(const char *username);
 void device_info(const char *username, const void *data, size_t dlen);
 void device_fastboot_continue(struct device *device);
 bool device_is_running(struct device *device);
+bool device_qdl_access_allowed(struct device *device,
+			       const char *username,
+			       const char *target);
 
 extern const struct control_ops alpaca_ops;
 extern const struct control_ops cdb_assist_ops;
