@@ -106,6 +106,28 @@ static void set_console_ops(struct device *dev, const struct console_ops *ops)
 	dev->console_ops = ops;
 }
 
+static void parse_users(struct device_parser *dp, struct device *dev)
+{
+	char value[TOKEN_LENGTH];
+
+	dev->users = calloc(1, sizeof(*dev->users));
+	list_init(dev->users);
+
+	if (device_parser_accept(dp, YAML_SCALAR_EVENT, value, 0))
+		return;
+
+	device_parser_expect(dp, YAML_SEQUENCE_START_EVENT, NULL, 0);
+
+	while (device_parser_accept(dp, YAML_SCALAR_EVENT, value, TOKEN_LENGTH)) {
+		struct device_user *user = calloc(1, sizeof(*user));
+
+		user->username = strdup(value);
+		list_append(dev->users, &user->node);
+	}
+
+	device_parser_expect(dp, YAML_SEQUENCE_END_EVENT, NULL, 0);
+}
+
 static void parse_board(struct device_parser *dp)
 {
 	struct device *dev;
@@ -116,24 +138,7 @@ static void parse_board(struct device_parser *dp)
 
 	while (device_parser_accept(dp, YAML_SCALAR_EVENT, key, TOKEN_LENGTH)) {
 		if (!strcmp(key, "users")) {
-			dev->users = calloc(1, sizeof(*dev->users));
-			list_init(dev->users);
-
-			if (device_parser_accept(dp, YAML_SCALAR_EVENT, value, 0))
-				continue;
-
-			device_parser_expect(dp, YAML_SEQUENCE_START_EVENT, NULL, 0);
-
-			while (device_parser_accept(dp, YAML_SCALAR_EVENT, key, TOKEN_LENGTH)) {
-				struct device_user *user = calloc(1, sizeof(*user));
-
-				user->username = strdup(key);
-
-				list_append(dev->users, &user->node);
-			}
-
-			device_parser_expect(dp, YAML_SEQUENCE_END_EVENT, NULL, 0);
-
+			parse_users(dp, dev);
 			continue;
 		}
 
