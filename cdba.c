@@ -611,13 +611,25 @@ static void usage(void)
 {
 	extern const char *__progname;
 
-	fprintf(stderr, "usage: %s -b <board> [-h <host>] [-t <timeout>] "
-			"[-T <inactivity-timeout>] [boot.img]\n",
+	fprintf(stderr, "usage: %s -b <board> [options] "
+			"[write <target> <image>]... [boot.img]\n",
 			__progname);
-	fprintf(stderr, "usage: %s -i -b <board> [-h <host>]\n",
+	fprintf(stderr, "usage: %s -i -b <board> [connection-options]\n",
 			__progname);
-	fprintf(stderr, "usage: %s -l [-h <host>]\n",
+	fprintf(stderr, "usage: %s -l [connection-options]\n",
 			__progname);
+	fprintf(stderr, "\n");
+	fprintf(stderr, "connection-options:\n");
+	fprintf(stderr, "  -h <host>        connect to remote host using ssh\n");
+	fprintf(stderr, "  -S <server>      cdba-server binary or command\n");
+	fprintf(stderr, "\n");
+	fprintf(stderr, "boot options:\n");
+	fprintf(stderr, "  -c <count>       power-cycle count on timeout or power-off marker\n");
+	fprintf(stderr, "  -C <count>       power-cycle count on power-off marker only\n");
+	fprintf(stderr, "  -R               repeat fastboot boot when fastboot reappears\n");
+	fprintf(stderr, "  -s <fifo>        write status updates to fifo\n");
+	fprintf(stderr, "  -t <seconds>     total timeout, 0 disables it (default: 600)\n");
+	fprintf(stderr, "  -T <seconds>     inactivity timeout\n");
 	exit(1);
 }
 
