@@ -6,6 +6,7 @@
 #include "list.h"
 
 struct cdb_assist;
+struct edl;
 struct fastboot;
 struct fastboot_ops;
 struct device;
@@ -43,10 +44,12 @@ struct device {
 	bool tickle_mmc;
 	bool usb_always_on;
 	bool power_always_on;
+	struct edl *edl;
 	struct fastboot *fastboot;
 	unsigned int fastboot_key_timeout;
 	unsigned int power_key_press_ms;
 	int state;
+	enum power_on_mode power_on_mode;
 	bool has_power_key;
 
 	bool status_enabled;
@@ -61,6 +64,11 @@ struct device {
 	void *cdb;
 	void *console;
 
+	char *qdl_programmer;
+	char *qdl_serial;
+	char *qdl_storage;
+	struct list_head *qdl_access;
+
 	char *status_cmd;
 
 	struct list_head node;
@@ -72,12 +80,26 @@ struct device_user {
 	struct list_head node;
 };
 
+struct device_qdl_target {
+	const char *target;
+
+	struct list_head node;
+};
+
+struct device_qdl_user {
+	const char *username;
+	struct list_head targets;
+
+	struct list_head node;
+};
+
 void device_add(struct device *device);
 
 struct device *device_open(const char *board,
 			   const char *username);
 void device_close(struct device *dev);
-int device_power(struct device *device, bool on);
+int device_power_on(struct device *device, enum power_on_mode mode);
+int device_power_off(struct device *device);
 void device_key(struct device *device, int key, bool asserted);
 
 void device_status_enable(struct device *device);
@@ -86,6 +108,7 @@ int device_write(struct device *device, const void *buf, size_t len);
 
 void device_boot(struct device *device, const void *data, size_t len);
 
+void device_edl_open(struct device *device, void (*edl_present)(bool present));
 void device_fastboot_open(struct device *device,
 			  struct fastboot_ops *fastboot_ops);
 void device_fastboot_boot(struct device *device);
@@ -95,6 +118,9 @@ void device_list_devices(const char *username);
 void device_info(const char *username, const void *data, size_t dlen);
 void device_fastboot_continue(struct device *device);
 bool device_is_running(struct device *device);
+bool device_qdl_access_allowed(struct device *device,
+			       const char *username,
+			       const char *target);
 
 extern const struct control_ops alpaca_ops;
 extern const struct control_ops cdb_assist_ops;

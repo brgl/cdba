@@ -11,10 +11,12 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <syslog.h>
 
 #include "cdba-server.h"
+#include "cdba.h"
 #include "circ_buf.h"
 #include "device.h"
 #include "device_parser.h"
@@ -25,6 +27,26 @@
 static const char *username;
 
 struct device *selected_device;
+
+struct edl_file {
+	struct list_head node;
+
+	int fd;
+
+	char *filename;
+	char *target;
+};
+
+static struct list_head edl_files = LIST_INIT(edl_files);
+
+static void edl_present(bool present)
+{
+	uint8_t value = present ? 1 : 0;
+
+	warnx("edl is %spresent", present? "" : "not ");
+
+	cdba_send_buf(MSG_EDL_PRESENT, 1, &value);
+}
 
 static void fastboot_opened(struct fastboot *fb, void *data)
 {
@@ -60,6 +82,7 @@ static void msg_select_board(const void *param)
 		fprintf(stderr, "failed to open %s\n", (const char *)param);
 		watch_quit();
 	} else {
+		device_edl_open(selected_device, edl_present);
 		device_fastboot_open(selected_device, &fastboot_ops);
 	}
 
@@ -91,6 +114,123 @@ static void msg_fastboot_download(const void *data, size_t len)
 		fastboot_payload = NULL;
 		fastboot_size = 0;
 	}
+}
+
+static struct edl_file *current_edl_file;
+
+static void msg_edl_download(const void *data, size_t len)
+{
+	char template[] = "/tmp/cdba.XXXXXX";
+	struct edl_file *edl;
+
+	edl = current_edl_file;
+
+	if (!edl) {
+		edl = calloc(1, sizeof(*edl));
+
+		edl->filename = strdup(template);
+		edl->fd = mkstemp(edl->filename);
+		if (edl->fd < 0)
+			err(1, "failed to create temporary file");
+
+		list_append(&edl_files, &edl->node);
+
+		current_edl_file = edl;
+	}
+
+	write(edl->fd, data, len);
+
+	if (len == 0)
+		close(edl->fd);
+}
+
+static void msg_edl_flash(const void *data, size_t len)
+{
+	const char *target = data;
+
+	if (!selected_device || !current_edl_file)
+		return;
+
+	if (!len || target[len - 1]) {
+		fprintf(stderr, "invalid EDL flash target\n");
+		watch_quit();
+		return;
+	}
+
+	fprintf(stderr, "edl flash into '%s'\n", target);
+
+	if (!device_qdl_access_allowed(selected_device, username, target)) {
+		fprintf(stderr, "user '%s' is not allowed to flash EDL target '%s' on %s\n",
+			username, target, selected_device->board);
+		watch_quit();
+		return;
+	}
+
+	current_edl_file->target = strdup(target);
+	current_edl_file = NULL;
+}
+
+static void msg_edl_reset(void)
+{
+	struct edl_file *edl;
+	const char **argv;
+	size_t args;
+	size_t arg = 0;
+
+	fprintf(stderr, "edl reset\n");
+
+	if (!selected_device) {
+		fprintf(stderr, "no device selected\n");
+		watch_quit();
+		return;
+	}
+
+	if (!selected_device->qdl_programmer) {
+		fprintf(stderr, "no EDL support configured for %s\n", selected_device->name);
+		watch_quit();
+		return;
+	}
+
+	list_for_each_entry(edl, &edl_files, node) {
+		if (!edl->target) {
+			fprintf(stderr, "EDL image without flash target\n");
+			watch_quit();
+			return;
+		}
+	}
+
+	args = 7 + list_len(&edl_files) * 3 + 1;
+	argv = calloc(args, sizeof(char *));
+
+	argv[arg++] = "qdl";
+	argv[arg++] = selected_device->qdl_programmer;
+
+	if (selected_device->qdl_storage) {
+		argv[arg++] = "--storage";
+		argv[arg++] = selected_device->qdl_storage;
+	}
+
+	if (selected_device->qdl_serial) {
+		argv[arg++] = "--serial";
+		argv[arg++] = selected_device->qdl_serial;
+	}
+
+	list_for_each_entry(edl, &edl_files, node) {
+		argv[arg++] = "write";
+		argv[arg++] = edl->target;
+		argv[arg++] = edl->filename;
+	}
+	argv[arg] = NULL;
+
+	if (fork() == 0) {
+		dup2(STDERR_FILENO, STDOUT_FILENO);
+		execvp("qdl", (char **)argv);
+		err(127, "failed to spawn qdl");
+	}
+	wait(NULL);
+
+	list_for_each_entry(edl, &edl_files, node)
+		unlink(edl->filename);
 }
 
 static void msg_fastboot_continue(void)
@@ -138,6 +278,7 @@ static int handle_stdin(int fd, void *buf)
 	static struct circ_buf recv_buf = { };
 	struct msg *msg;
 	struct msg hdr;
+	uint8_t mode;
 	size_t n;
 	int ret;
 
@@ -171,12 +312,22 @@ static int handle_stdin(int fd, void *buf)
 			// fprintf(stderr, "hard reset\n");
 			break;
 		case MSG_POWER_ON:
-			device_power(selected_device, true);
+			if (msg->len == 1)
+				mode = *(uint8_t *)msg->data;
+			else
+				mode = MSG_POWER_ON_FASTBOOT;
+
+			if (mode >= MSG_POWER_ON_COUNT) {
+				fprintf(stderr, "invalid power on mode requested\n");
+				exit(1);
+			}
+
+			device_power_on(selected_device, mode);
 
 			cdba_send(MSG_POWER_ON);
 			break;
 		case MSG_POWER_OFF:
-			device_power(selected_device, false);
+			device_power_off(selected_device);
 
 			cdba_send(MSG_POWER_OFF);
 			break;
@@ -209,6 +360,15 @@ static int handle_stdin(int fd, void *buf)
 			break;
 		case MSG_KEY_PRESS:
 			msg_key_press(msg->data, msg->len);
+			break;
+		case MSG_EDL_DOWNLOAD:
+			msg_edl_download(msg->data, msg->len);
+			break;
+		case MSG_EDL_WRITE:
+			msg_edl_flash(msg->data, msg->len);
+			break;
+		case MSG_EDL_RESET:
+			msg_edl_reset();
 			break;
 		default:
 			fprintf(stderr, "unk %d len %d\n", msg->type, msg->len);

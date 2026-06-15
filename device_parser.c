@@ -106,6 +106,92 @@ static void set_console_ops(struct device *dev, const struct console_ops *ops)
 	dev->console_ops = ops;
 }
 
+static void parse_users(struct device_parser *dp, struct device *dev)
+{
+	char value[TOKEN_LENGTH];
+
+	dev->users = calloc(1, sizeof(*dev->users));
+	list_init(dev->users);
+
+	if (device_parser_accept(dp, YAML_SCALAR_EVENT, value, 0))
+		return;
+
+	device_parser_expect(dp, YAML_SEQUENCE_START_EVENT, NULL, 0);
+
+	while (device_parser_accept(dp, YAML_SCALAR_EVENT, value, TOKEN_LENGTH)) {
+		struct device_user *user = calloc(1, sizeof(*user));
+
+		user->username = strdup(value);
+		list_append(dev->users, &user->node);
+	}
+
+	device_parser_expect(dp, YAML_SEQUENCE_END_EVENT, NULL, 0);
+}
+
+static void parse_qdl_targets(struct device_parser *dp, struct list_head *targets)
+{
+	char value[TOKEN_LENGTH];
+
+	if (device_parser_accept(dp, YAML_SCALAR_EVENT, value, 0))
+		return;
+
+	device_parser_expect(dp, YAML_SEQUENCE_START_EVENT, NULL, 0);
+
+	while (device_parser_accept(dp, YAML_SCALAR_EVENT, value, TOKEN_LENGTH)) {
+		struct device_qdl_target *target = calloc(1, sizeof(*target));
+
+		target->target = strdup(value);
+		list_append(targets, &target->node);
+	}
+
+	device_parser_expect(dp, YAML_SEQUENCE_END_EVENT, NULL, 0);
+}
+
+static void parse_qdl_access(struct device_parser *dp, struct device *dev)
+{
+	char key[TOKEN_LENGTH];
+
+	dev->qdl_access = calloc(1, sizeof(*dev->qdl_access));
+	list_init(dev->qdl_access);
+
+	if (device_parser_accept(dp, YAML_SCALAR_EVENT, key, 0))
+		return;
+
+	device_parser_expect(dp, YAML_SEQUENCE_START_EVENT, NULL, 0);
+
+	while (device_parser_accept(dp, YAML_MAPPING_START_EVENT, NULL, 0)) {
+		struct device_qdl_user *user = calloc(1, sizeof(*user));
+		bool have_username = false;
+		bool have_targets = false;
+
+		list_init(&user->targets);
+
+		while (device_parser_accept(dp, YAML_SCALAR_EVENT, key, TOKEN_LENGTH)) {
+			if (!strcmp(key, "user")) {
+				device_parser_expect(dp, YAML_SCALAR_EVENT, key, TOKEN_LENGTH);
+				user->username = strdup(key);
+				have_username = true;
+			} else if (!strcmp(key, "targets")) {
+				parse_qdl_targets(dp, &user->targets);
+				have_targets = true;
+			} else {
+				fprintf(stderr, "device parser: unknown qdl_access key \"%s\"\n", key);
+				exit(1);
+			}
+		}
+
+		if (!have_username || !have_targets || list_empty(&user->targets)) {
+			fprintf(stderr, "device parser: incomplete qdl_access entry\n");
+			exit(1);
+		}
+
+		list_append(dev->qdl_access, &user->node);
+		device_parser_expect(dp, YAML_MAPPING_END_EVENT, NULL, 0);
+	}
+
+	device_parser_expect(dp, YAML_SEQUENCE_END_EVENT, NULL, 0);
+}
+
 static void parse_board(struct device_parser *dp)
 {
 	struct device *dev;
@@ -116,24 +202,12 @@ static void parse_board(struct device_parser *dp)
 
 	while (device_parser_accept(dp, YAML_SCALAR_EVENT, key, TOKEN_LENGTH)) {
 		if (!strcmp(key, "users")) {
-			dev->users = calloc(1, sizeof(*dev->users));
-			list_init(dev->users);
+			parse_users(dp, dev);
+			continue;
+		}
 
-			if (device_parser_accept(dp, YAML_SCALAR_EVENT, value, 0))
-				continue;
-
-			device_parser_expect(dp, YAML_SEQUENCE_START_EVENT, NULL, 0);
-
-			while (device_parser_accept(dp, YAML_SCALAR_EVENT, key, TOKEN_LENGTH)) {
-				struct device_user *user = calloc(1, sizeof(*user));
-
-				user->username = strdup(key);
-
-				list_add(dev->users, &user->node);
-			}
-
-			device_parser_expect(dp, YAML_SEQUENCE_END_EVENT, NULL, 0);
-
+		if (!strcmp(key, "qdl_access")) {
+			parse_qdl_access(dp, dev);
 			continue;
 		}
 
@@ -215,6 +289,12 @@ static void parse_board(struct device_parser *dp)
 			dev->status_cmd = strdup(value);
 		} else if (!strcmp(key, "power_always_on")) {
 			dev->power_always_on = !strcmp(value, "true");
+		} else if (!strcmp(key, "qdl_programmer")) {
+			dev->qdl_programmer = strdup(value);
+		} else if (!strcmp(key, "qdl_serial")) {
+			dev->qdl_serial = strdup(value);
+		} else if (!strcmp(key, "qdl_storage")) {
+			dev->qdl_storage = strdup(value);
 		} else {
 			fprintf(stderr, "device parser: unknown key \"%s\"\n", key);
 			exit(1);

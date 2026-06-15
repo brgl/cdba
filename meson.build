@@ -85,6 +85,7 @@ endif
 cdbalib_srcs = ['circ_buf.c',
 	       'device.c',
 	       'device_parser.c',
+	       'edl.c',
 	       'fastboot.c',
 	       'console.c',
 	       'ppps.c',

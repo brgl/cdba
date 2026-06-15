@@ -19,11 +19,14 @@
 
 #include "cdba-server.h"
 #include "device.h"
+#include "edl.h"
 #include "fastboot.h"
 #include "list.h"
 #include "ppps.h"
 #include "status-cmd.h"
 #include "watch.h"
+
+#define EDL_KEY_TIMEOUT_MS 2000
 
 #define ARRAY_SIZE(x) ((sizeof(x)/sizeof((x)[0])))
 
@@ -43,7 +46,7 @@ static struct list_head devices = LIST_INIT(devices);
 
 void device_add(struct device *device)
 {
-	list_add(&devices, &device->node);
+	list_append(&devices, &device->node);
 }
 
 static void device_lock(struct device *device)
@@ -99,8 +102,6 @@ static bool device_check_access(struct device *device,
 
 	return false;
 }
-
-static int device_power_off(struct device *device);
 
 struct device *device_open(const char *board,
 			   const char *username)
@@ -175,6 +176,7 @@ enum {
 	DEVICE_STATE_PRESS,
 	DEVICE_STATE_RELEASE_PWR,
 	DEVICE_STATE_RELEASE_FASTBOOT,
+	DEVICE_STATE_RELEASE_EDL,
 	DEVICE_STATE_RUNNING,
 };
 
@@ -185,7 +187,9 @@ static void device_tick(void *data)
 	switch (device->state) {
 	case DEVICE_STATE_START:
 		/* Make sure power key is not engaged */
-		if (device->fastboot_key_timeout)
+		if (device->power_on_mode == MSG_POWER_ON_EDL)
+			device_key(device, DEVICE_KEY_EDL, true);
+		else if (device->fastboot_key_timeout)
 			device_key(device, DEVICE_KEY_FASTBOOT, true);
 		if (device->has_power_key)
 			device_key(device, DEVICE_KEY_POWER, false);
@@ -201,6 +205,9 @@ static void device_tick(void *data)
 		if (device->has_power_key) {
 			device->state = DEVICE_STATE_PRESS;
 			watch_timer_add(250, device_tick, device);
+		} else if (device->power_on_mode == MSG_POWER_ON_EDL) {
+			device->state = DEVICE_STATE_RELEASE_EDL;
+			watch_timer_add(EDL_KEY_TIMEOUT_MS, device_tick, device);
 		} else if (device->fastboot_key_timeout) {
 			device->state = DEVICE_STATE_RELEASE_FASTBOOT;
 			watch_timer_add(device->fastboot_key_timeout * 1000, device_tick, device);
@@ -222,12 +229,19 @@ static void device_tick(void *data)
 		/* Release power key */
 		device_key(device, DEVICE_KEY_POWER, false);
 
-		if (device->fastboot_key_timeout) {
+		if (device->power_on_mode == MSG_POWER_ON_EDL) {
+			device->state = DEVICE_STATE_RELEASE_EDL;
+			watch_timer_add(EDL_KEY_TIMEOUT_MS, device_tick, device);
+		} else if (device->fastboot_key_timeout) {
 			device->state = DEVICE_STATE_RELEASE_FASTBOOT;
 			watch_timer_add(device->fastboot_key_timeout * 1000, device_tick, device);
 		} else {
 			device->state = DEVICE_STATE_RUNNING;
 		}
+		break;
+	case DEVICE_STATE_RELEASE_EDL:
+		device_key(device, DEVICE_KEY_EDL, false);
+		device->state = DEVICE_STATE_RUNNING;
 		break;
 	case DEVICE_STATE_RELEASE_FASTBOOT:
 		device_key(device, DEVICE_KEY_FASTBOOT, false);
@@ -241,18 +255,19 @@ bool device_is_running(struct device *device)
 	return device->state == DEVICE_STATE_RUNNING;
 }
 
-static int device_power_on(struct device *device)
+int device_power_on(struct device *device, enum power_on_mode mode)
 {
 	if (!device || !device_has_control(device, power))
 		return 0;
 
+	device->power_on_mode = mode;
 	device->state = DEVICE_STATE_START;
 	device_tick(device);
 
 	return 0;
 }
 
-static int device_power_off(struct device *device)
+int device_power_off(struct device *device)
 {
 	if (!device || !device_has_control(device, power))
 		return 0;
@@ -260,14 +275,6 @@ static int device_power_off(struct device *device)
 	device_control(device, power, false);
 
 	return 0;
-}
-
-int device_power(struct device *device, bool on)
-{
-	if (on)
-		return device_power_on(device);
-	else
-		return device_power_off(device);
 }
 
 void device_status_enable(struct device *device)
@@ -298,6 +305,11 @@ int device_write(struct device *device, const void *buf, size_t len)
 		return 0;
 
 	return device_console(device, write, buf, len);
+}
+
+void device_edl_open(struct device *device, void (*edl_present)(bool present))
+{
+	device->edl = edl_open(device->serial, edl_present);
 }
 
 void device_fastboot_open(struct device *device,
@@ -398,12 +410,39 @@ void device_info(const char *username, const void *data, size_t dlen)
 	cdba_send_buf(MSG_BOARD_INFO, len, description);
 }
 
+bool device_qdl_access_allowed(struct device *device,
+			       const char *username,
+			       const char *target)
+{
+	struct device_qdl_user *user;
+	struct device_qdl_target *qdl_target;
+
+	if (!device->qdl_access)
+		return true;
+
+	if (!username || !target)
+		return false;
+
+	list_for_each_entry(user, device->qdl_access, node) {
+		if (strcmp(user->username, username))
+			continue;
+
+		list_for_each_entry(qdl_target, &user->targets, node) {
+			if (!strcmp(qdl_target->target, "all") ||
+			    !strcmp(qdl_target->target, target))
+				return true;
+		}
+	}
+
+	return false;
+}
+
 void device_close(struct device *dev)
 {
 	if (!dev->usb_always_on)
 		device_usb(dev, false);
 	if (!dev->power_always_on)
-		device_power(dev, false);
+		device_power_off(dev);
 
 	if (device_has_control(dev, close))
 		device_control(dev, close);

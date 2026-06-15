@@ -82,6 +82,43 @@ properties:
           description: Command to execute for generating status updates
           type: string
 
+        qdl_programmer:
+          description: path to the firehose programmer to use for QDL flashing
+          type: string
+
+        qdl_serial:
+          description: serial number of the EDL device to use for QDL flashing
+          type: string
+
+        qdl_storage:
+          description: storage type to pass to QDL when flashing
+          type: string
+
+        qdl_access:
+          description: >
+            User access allowance for QDL flash targets. Targets use QDL syntax:
+            <partition-name>, <lun>, <lun>/<partition-name>, or
+            <lun>/<start-sector>. Bare partition names are resolved by QDL
+            across all LUNs; use "all" to allow any target.
+          type: array
+          uniqueItems: true
+          minItems: 1
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              user:
+                type: string
+              targets:
+                type: array
+                uniqueItems: true
+                minItems: 1
+                items:
+                  type: string
+            required:
+              - user
+              - targets
+
         qcomlt_debug_board:
           description: Qlt Debug Board control tty device path
           $ref: "#/$defs/device_path"

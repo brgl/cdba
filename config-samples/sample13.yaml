@@ -1,0 +1,21 @@
+---
+devices:
+  - board: myboard
+    name: "My Board"
+    description: |
+      My Awesome board with QDL flashing support
+    console: /dev/ttyABC0
+    fastboot: cacafada
+    fastboot_set_active: true
+    fastboot_key_timeout: 2
+    qdl_programmer: /path/to/prog_firehose_ddr.elf
+    qdl_serial: 1234567890ABCDEF
+    qdl_storage: ufs
+    qdl_access:
+      - user: alice
+        targets:
+          - all
+      - user: bob
+        targets:
+          - userdata
+          - 0/123456
