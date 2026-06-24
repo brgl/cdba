@@ -834,9 +834,9 @@ int main(int argc, char **argv)
 			const char blue[] = "\033[94m";
 			const char reset[] = "\033[0m";
 
-			write(2, blue, sizeof(blue) - 1);
-			write(2, buf, n);
-			write(2, reset, sizeof(reset) - 1);
+			write(STDERR_FILENO, blue, sizeof(blue) - 1);
+			write(STDERR_FILENO, buf, n);
+			write(STDERR_FILENO, reset, sizeof(reset) - 1);
 
 			bump_inactivity_timer = true;
 		}

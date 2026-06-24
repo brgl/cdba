@@ -29,7 +29,7 @@ static int external_helper(struct external *ext, const char *command, bool on)
 	switch (pid) {
 	case 0:
 		/* Do not clobber stdout with program messages or cdba will become confused */
-		dup2(2, 1);
+		dup2(STDERR_FILENO, STDOUT_FILENO);
 		return execlp(ext->path, ext->path, ext->board, command, on ? "on": "off", NULL);
 	case -1:
 		return -1;
