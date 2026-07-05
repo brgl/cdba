@@ -25,7 +25,7 @@ int local_gpio_init(struct local_gpio *local_gpio)
 	int i;
 
 	for (i = 0; i < GPIO_COUNT; ++i) {
-		struct gpiod_line_request_config cfg;
+		struct gpiod_line_request_config cfg = { 0 };
 
 		if (!local_gpio->options->gpios[i].present)
 			continue;
