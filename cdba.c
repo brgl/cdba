@@ -10,6 +10,7 @@
 #include <sys/types.h>
 #include <sys/uio.h>
 #include <sys/wait.h>
+#include <sys/ioctl.h>
 #include <alloca.h>
 #include <err.h>
 #include <errno.h>
@@ -53,11 +54,260 @@ struct tx_item {
 	uint16_t len;
 
 	int fd;
+	char *upload_name;
+	size_t upload_size;
+	bool upload_eof;
 
 	uint8_t payload[];
 };
 
 static struct list_head tx_queue = LIST_INIT(tx_queue);
+
+enum upload_type {
+	UPLOAD_NONE,
+	UPLOAD_FASTBOOT,
+	UPLOAD_EDL,
+	UPLOAD_MIXED,
+};
+
+struct upload_progress {
+	bool enabled;
+	bool active;
+
+	size_t total_bytes;
+	size_t sent_bytes;
+	size_t line_len;
+	unsigned int tty_width;
+	enum upload_type type;
+	char name[64];
+
+	struct timeval last_update;
+};
+
+static struct upload_progress upload_progress;
+
+static void upload_progress_render(bool force);
+
+static const char *upload_type_name(enum upload_type type)
+{
+	switch (type) {
+	case UPLOAD_FASTBOOT:
+		return "fastboot";
+	case UPLOAD_EDL:
+		return "edl";
+	case UPLOAD_MIXED:
+		return "mixed";
+	default:
+		return "upload";
+	}
+}
+
+static bool is_upload_msg(uint8_t type)
+{
+	return type == MSG_FASTBOOT_DOWNLOAD || type == MSG_EDL_DOWNLOAD;
+}
+
+static enum upload_type msg_upload_type(uint8_t type)
+{
+	if (type == MSG_FASTBOOT_DOWNLOAD)
+		return UPLOAD_FASTBOOT;
+	if (type == MSG_EDL_DOWNLOAD)
+		return UPLOAD_EDL;
+
+	return UPLOAD_NONE;
+}
+
+static const char *path_basename(const char *path)
+{
+	const char *base;
+
+	base = strrchr(path, '/');
+	if (!base || !base[1])
+		return path;
+
+	return base + 1;
+}
+
+static void upload_progress_clear_line(void)
+{
+	char spaces[160];
+	size_t to_clear;
+
+	if (!upload_progress.enabled || !upload_progress.line_len)
+		return;
+
+	to_clear = MIN(upload_progress.line_len, sizeof(spaces));
+	memset(spaces, ' ', to_clear);
+	write(STDERR_FILENO, "\r", 1);
+	write(STDERR_FILENO, spaces, to_clear);
+	write(STDERR_FILENO, "\r", 1);
+	upload_progress.line_len = 0;
+}
+
+static void upload_progress_write(int fd, const void *buf, size_t len)
+{
+	upload_progress_clear_line();
+	write(fd, buf, len);
+	upload_progress_render(true);
+}
+
+static void upload_progress_render(bool force)
+{
+	struct timeval now;
+	unsigned long elapsed_us;
+	char bar[40];
+	char line[192];
+	double percent;
+	double sent_mb;
+	double total_mb;
+	size_t filled;
+	size_t empty;
+	size_t line_len;
+	int line_n;
+	int bar_n;
+
+	if (!upload_progress.enabled || !upload_progress.active || !upload_progress.total_bytes)
+		return;
+
+	if (!force && upload_progress.last_update.tv_sec) {
+		gettimeofday(&now, NULL);
+		elapsed_us = (now.tv_sec - upload_progress.last_update.tv_sec) * 1000000 +
+			     (now.tv_usec - upload_progress.last_update.tv_usec);
+		if (elapsed_us < 100000)
+			return;
+	}
+
+	percent = (double)upload_progress.sent_bytes / upload_progress.total_bytes;
+	if (percent > 1.0)
+		percent = 1.0;
+
+	filled = percent * (sizeof(bar) - 1);
+	empty = (sizeof(bar) - 1) - filled;
+
+	bar_n = snprintf(bar, sizeof(bar), "%.*s%.*s",
+			 (int)filled,
+			 "#######################################",
+			 (int)empty,
+			 "---------------------------------------");
+	if (bar_n < 0)
+		return;
+
+	sent_mb = (double)upload_progress.sent_bytes / 1000000.0;
+	total_mb = (double)upload_progress.total_bytes / 1000000.0;
+
+	line_n = snprintf(line, sizeof(line), "%s %6.2f%% [%s] %.2f/%.2f MB",
+			  upload_progress.name[0] ? upload_progress.name :
+			  upload_type_name(upload_progress.type),
+			  percent * 100.0,
+			  bar,
+			  sent_mb, total_mb);
+	if (line_n < 0)
+		return;
+
+	line_len = MIN((size_t)line_n, sizeof(line) - 1);
+	if (line_len > upload_progress.tty_width - 1)
+		line_len = upload_progress.tty_width - 1;
+
+	write(STDERR_FILENO, "\r", 1);
+	write(STDERR_FILENO, line, line_len);
+	if (upload_progress.line_len > line_len) {
+		size_t tail = upload_progress.line_len - line_len;
+		char spaces_tail[160];
+
+		tail = MIN(tail, sizeof(spaces_tail));
+		memset(spaces_tail, ' ', tail);
+		write(STDERR_FILENO, spaces_tail, tail);
+	}
+	upload_progress.line_len = line_len;
+
+	gettimeofday(&upload_progress.last_update, NULL);
+}
+
+static void upload_progress_finish(void)
+{
+	if (!upload_progress.active)
+		return;
+
+	upload_progress_render(true);
+	if (upload_progress.line_len)
+		write(STDERR_FILENO, "\n", 1);
+
+	upload_progress.active = false;
+	upload_progress.type = UPLOAD_NONE;
+	upload_progress.sent_bytes = 0;
+	upload_progress.total_bytes = 0;
+	upload_progress.line_len = 0;
+	upload_progress.name[0] = '\0';
+	upload_progress.last_update = (struct timeval){ 0 };
+}
+
+static void upload_progress_start(const struct tx_item *item)
+{
+	const char *name = item->upload_name;
+	size_t max_name;
+
+	upload_progress.active = true;
+	upload_progress.type = msg_upload_type(item->type);
+	upload_progress.sent_bytes = 0;
+	upload_progress.total_bytes = item->upload_size;
+	upload_progress.line_len = 0;
+	upload_progress.last_update = (struct timeval){ 0 };
+
+	if (!name || !name[0])
+		name = upload_type_name(upload_progress.type);
+
+	max_name = sizeof(upload_progress.name) - 1;
+	snprintf(upload_progress.name, sizeof(upload_progress.name), "%.*s",
+		 (int)max_name, name);
+}
+
+static bool upload_progress_is_same_file(const struct tx_item *item)
+{
+	const char *name = item->upload_name;
+
+	if (!name || !name[0])
+		name = upload_type_name(msg_upload_type(item->type));
+
+	return upload_progress.active &&
+	       upload_progress.type == msg_upload_type(item->type) &&
+	       !strcmp(upload_progress.name, name);
+}
+
+static void upload_progress_sent(const struct tx_item *item)
+{
+	if (!is_upload_msg(item->type))
+		return;
+
+	if (!upload_progress_is_same_file(item)) {
+		if (upload_progress.active)
+			upload_progress_finish();
+		upload_progress_start(item);
+	}
+
+	if (item->len) {
+		upload_progress.sent_bytes += item->len;
+		upload_progress_render(false);
+	}
+
+	if (item->upload_eof)
+		upload_progress_finish();
+}
+
+static void upload_progress_init(void)
+{
+	struct winsize w = { };
+
+	if (!isatty(STDERR_FILENO))
+		return;
+
+	if (!ioctl(STDERR_FILENO, TIOCGWINSZ, &w) && w.ws_col > 0)
+		upload_progress.tty_width = w.ws_col;
+	else
+		upload_progress.tty_width = 80;
+
+	upload_progress.tty_width = MIN(upload_progress.tty_width, 120);
+	upload_progress.enabled = upload_progress.tty_width >= 60;
+}
 
 static struct termios *tty_unbuffer(void)
 {
@@ -202,7 +452,9 @@ static void cdba_queue_data(int type, size_t len, const void *buf)
 	list_append(&tx_queue, &item->node);
 }
 
-static void cdba_queue_fd(int type, size_t len, int fd)
+static void cdba_queue_fd(int type, size_t len, int fd,
+			  const char *upload_name, size_t upload_size,
+			  bool upload_eof)
 {
 	struct tx_item *item;
 
@@ -210,6 +462,10 @@ static void cdba_queue_fd(int type, size_t len, int fd)
 	item->type = type;
 	item->len = len;
 	item->fd = fd;
+	if (upload_name)
+		item->upload_name = strdup(upload_name);
+	item->upload_size = upload_size;
+	item->upload_eof = upload_eof;
 
 	list_append(&tx_queue, &item->node);
 }
@@ -383,9 +639,11 @@ static void request_fastboot_files(void)
 
 	for (offset = 0; offset < sb.st_size; offset += TX_DATA_CHUNK_SIZE) {
 		len = MIN(TX_DATA_CHUNK_SIZE, sb.st_size - offset);
-		cdba_queue_fd(MSG_FASTBOOT_DOWNLOAD, len, fd);
+		cdba_queue_fd(MSG_FASTBOOT_DOWNLOAD, len, fd,
+			      path_basename(fastboot_file), sb.st_size, false);
 	}
-	cdba_queue_fd(MSG_FASTBOOT_DOWNLOAD, 0, fd);
+	cdba_queue_fd(MSG_FASTBOOT_DOWNLOAD, 0, fd,
+		      path_basename(fastboot_file), sb.st_size, true);
 }
 
 static void edl_submit_one(struct edl_file *edl)
@@ -403,9 +661,11 @@ static void edl_submit_one(struct edl_file *edl)
 
 	for (offset = 0; offset < sb.st_size; offset += TX_DATA_CHUNK_SIZE) {
 		len = MIN(TX_DATA_CHUNK_SIZE, sb.st_size - offset);
-		cdba_queue_fd(MSG_EDL_DOWNLOAD, len, fd);
+		cdba_queue_fd(MSG_EDL_DOWNLOAD, len, fd,
+			      path_basename(edl->filename), sb.st_size, false);
 	}
-	cdba_queue_fd(MSG_EDL_DOWNLOAD, 0, fd);
+	cdba_queue_fd(MSG_EDL_DOWNLOAD, 0, fd,
+		      path_basename(edl->filename), sb.st_size, true);
 
 	cdba_queue_data(MSG_EDL_WRITE, strlen(edl->target) + 1, edl->target);
 }
@@ -469,7 +729,7 @@ static void handle_list_devices(const void *data, size_t len)
 	board = alloca(len + 1);
 	memcpy(board, data, len);
 	board[len] = '\n';
-	write(STDOUT_FILENO, board, len + 1);
+	upload_progress_write(STDOUT_FILENO, board, len + 1);
 }
 
 static void handle_board_info(const void *data, size_t len)
@@ -479,7 +739,7 @@ static void handle_board_info(const void *data, size_t len)
 	info = alloca(len + 1);
 	memcpy(info, data, len);
 	info[len] = '\n';
-	write(STDOUT_FILENO, info, len + 1);
+	upload_progress_write(STDOUT_FILENO, info, len + 1);
 
 	quit = true;
 }
@@ -506,7 +766,7 @@ static void handle_console(const void *data, size_t len)
 		}
 	}
 
-	write(STDOUT_FILENO, data, len);
+	upload_progress_write(STDOUT_FILENO, data, len);
 }
 
 static bool auto_power_on;
@@ -748,6 +1008,7 @@ int main(int argc, char **argv)
 	if (ret)
 		err(1, "failed to connect to \"%s\"", host);
 
+	upload_progress_init();
 	orig_tios = tty_unbuffer();
 
 	timeout_total_tv = get_timeout(timeout_total);
@@ -837,9 +1098,10 @@ int main(int argc, char **argv)
 			const char blue[] = "\033[94m";
 			const char reset[] = "\033[0m";
 
-			write(2, blue, sizeof(blue) - 1);
-			write(2, buf, n);
-			write(2, reset, sizeof(reset) - 1);
+			write(STDERR_FILENO, blue, sizeof(blue) - 1);
+			write(STDERR_FILENO, buf, n);
+			write(STDERR_FILENO, reset, sizeof(reset) - 1);
+			upload_progress_render(true);
 
 			bump_inactivity_timer = true;
 		}
@@ -864,8 +1126,10 @@ int main(int argc, char **argv)
 				n = cdba_tx_one(ssh_fds[0], tx_item);
 				if (n < 0)
 					err(1, "failed to write to SSH pipe");
+				upload_progress_sent(tx_item);
 
 				list_del(&tx_item->node);
+				free(tx_item->upload_name);
 				free(tx_item);
 
 				bump_inactivity_timer = true;
@@ -885,6 +1149,8 @@ int main(int argc, char **argv)
 		printf("Waiting for ssh to finish\n");
 
 	wait(NULL);
+	upload_progress_finish();
+	upload_progress_clear_line();
 
 	tty_reset(orig_tios);
 
