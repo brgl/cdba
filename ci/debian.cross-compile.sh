@@ -19,7 +19,7 @@ dpkg --add-architecture $ARCH
 apt update
 
 apt install -y --no-install-recommends \
-	libftdi-dev:${ARCH} \
+	libftdi1-dev:${ARCH} \
 	libudev-dev:${ARCH} \
 	libyaml-dev:${ARCH} \
 	libgpiod-dev:${ARCH} \
