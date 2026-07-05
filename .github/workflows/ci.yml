@@ -183,7 +183,7 @@ jobs:
         echo "PKG_CONFIG_PATH: $PKG_CONFIG_PATH"
 
     - name: Git checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Install additional packages
       run: |
