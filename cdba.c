@@ -130,7 +130,10 @@ static int fork_ssh(const char *host, const char *cmd, int *pipes)
 		close(piped_stderr[1]);
 
 		if (host) {
-			execlp("ssh", "ssh", host, cmd, NULL);
+			execlp("ssh", "ssh",
+			       "-o", "ServerAliveInterval=30",
+			       "-o", "ServerAliveCountMax=3",
+			       host, cmd, NULL);
 			err(1, "launching ssh failed");
 		} else {
 			execlp(cmd, cmd, NULL);
