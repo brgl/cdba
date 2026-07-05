@@ -59,10 +59,12 @@ cdbalib_deps = [dependency('libudev', required: server_opt),
 	       gpiod_dep,
 	       ftdi_dep]
 
-# E.g. Debian reuires -lutil for forkpty
-if not compiler.has_function('forkpty')
-  util_dep = compiler.find_library('util')
-  cdbalib_deps += util_dep
+# E.g. Debian requires -lutil for forkpty
+if not compiler.has_function('forkpty', prefix: '#include <pty.h>')
+  util_dep = compiler.find_library('util', required: false)
+  if util_dep.found()
+    cdbalib_deps += util_dep
+  endif
 endif
 
 drivers_srcs = ['drivers/alpaca.c',

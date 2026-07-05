@@ -39,18 +39,10 @@ jobs:
           - debian:stable
           - debian:bookworm
           - debian:bullseye
-          - debian:buster
           # Fails on configure on GCC and clang (process restrictions?)
           # - fedora:rawhide
           - fedora:latest
-          - fedora:42
-          - fedora:41
-          - fedora:40
-          - fedora:39
-          - fedora:38
-          - fedora:37
           - ubuntu:latest
-          - ubuntu:oracular
           - ubuntu:noble
           - ubuntu:jammy
           - ubuntu:focal
@@ -82,14 +74,6 @@ jobs:
             arch: i386
             family: x86
             compiler: gcc
-            cross_compile: i686-linux-gnu
-            pkg_config_path: /usr/lib/i386-linux-gnu/pkgconfig
-            variant: i386
-
-          - container: "debian:buster"
-            arch: i386
-            family: x86
-            compiler: gcc -m32
             cross_compile: i686-linux-gnu
             pkg_config_path: /usr/lib/i386-linux-gnu/pkgconfig
             variant: i386
@@ -183,7 +167,7 @@ jobs:
         echo "PKG_CONFIG_PATH: $PKG_CONFIG_PATH"
 
     - name: Git checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Install additional packages
       run: |

@@ -20,7 +20,7 @@ apt install -y --no-install-recommends \
 	linux-libc-dev:i386
 
 apt install -y --no-install-recommends \
-	libftdi-dev:i386 \
+	libftdi1-dev:i386 \
 	libudev-dev:i386 \
 	libyaml-dev:i386 \
 	libgpiod-dev:i386 \

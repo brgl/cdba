@@ -29,7 +29,7 @@ esac
 
 apt install -y --no-install-recommends \
 	pkg-config \
-	libftdi-dev \
+	libftdi1-dev \
 	libudev-dev \
 	libyaml-dev \
 	libgpiod-dev \
