@@ -193,7 +193,8 @@ static void cdba_queue_data(int type, size_t len, const void *buf)
 	item->type = type;
 	item->len = len;
 	item->fd = -1;
-	memcpy(item->payload, buf, len);
+	if (len)
+		memcpy(item->payload, buf, len);
 
 	list_append(&tx_queue, &item->node);
 }
