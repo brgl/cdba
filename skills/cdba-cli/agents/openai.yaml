@@ -1,0 +1,4 @@
+interface:
+  display_name: "CDBA CLI Operator"
+  short_description: "Operate remote CDBA boards using the cdba CLI."
+  default_prompt: "Use cdba CLI to discover boards, inspect board info, and boot images with safe preflight checks and clear console-exit guidance."
